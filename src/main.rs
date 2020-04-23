@@ -122,7 +122,11 @@ fn main() -> Result<()> {
                     let mut output_lib_file = std::fs::File::create(&output_lib_link_file)?;
                     let args = parse_quotes(&last_line);
                     if let Some(linker_flavor) = args.first() {
-                        match linker_flavor.as_str() {
+                        let linker_flavor_path = PathBuf::from(linker_flavor);
+                        let linker_flavor_filename = linker_flavor_path
+                            .file_name()
+                            .unwrap_or(std::ffi::OsStr::new(""));
+                        match linker_flavor_filename.to_str().unwrap_or("") {
                             "link.exe" | "lld-link.exe" => {}
                             _ => panic!("Unrecognized linker flavor {}", linker_flavor),
                         }
@@ -147,11 +151,21 @@ fn main() -> Result<()> {
                                     )?;
                                 }
                                 "DEF" => {
-                                    let def_file_path = output_lib_link_file.with_file_name("build_def.def");
-                                    std::fs::copy(option_arg, &def_file_path).expect("Failed to copy def file");
+                                    let def_file_path =
+                                        output_lib_link_file.with_file_name("build_def.def");
+                                    std::fs::copy(option_arg, &def_file_path)
+                                        .expect("Failed to copy def file");
                                     // include DEF file for both linker and lib
-                                    writeln!(&mut output_linker_file, "/DEF:\"{}\"", def_file_path.to_string_lossy())?;
-                                    writeln!(&mut output_lib_file, "/DEF:\"{}\"", def_file_path.to_string_lossy())?;
+                                    writeln!(
+                                        &mut output_linker_file,
+                                        "/DEF:\"{}\"",
+                                        def_file_path.to_string_lossy()
+                                    )?;
+                                    writeln!(
+                                        &mut output_lib_file,
+                                        "/DEF:\"{}\"",
+                                        def_file_path.to_string_lossy()
+                                    )?;
                                 }
                                 _ => {}
                             }
