@@ -59,9 +59,9 @@ fn main() -> Result<()> {
         (author: "Elliott Mahler <jointogethe.r@gmail.com>")
         (about: "Runs cargo and cbindgen on a crate. Intended for use with Unreal Engine's build system.")
         (@arg CRATE_DIR: --crate_dir +required +takes_value "Input crate directory")
-        (@arg OUTPUT_HEADER_FILE: --output_header_file +required +takes_value "Destination filename for the generated header")
-        (@arg OUTPUT_LINKER_FILE: --output_linker_file +required +takes_value "Path to output linker args at")
-        (@arg OUTPUT_LIB_LINK_FILE: --output_lib_link_file +required +takes_value "Path to output library linker (LIB.EXE) args at")
+        (@arg OUTPUT_HEADER_FILE: --output_header_file +takes_value "Destination filename for the generated header")
+        (@arg OUTPUT_LINKER_FILE: --output_linker_file +takes_value "Path to output linker args at")
+        (@arg OUTPUT_LIB_LINK_FILE: --output_lib_link_file +takes_value "Path to output library linker (LIB.EXE) args at")
         (@arg CARGO_ARGS: +multiple +last +allow_hyphen_values "Arguments to cargo. Cargo will be run with \"crate_dir\" as the working directory.")
 	).get_matches();
 
@@ -70,14 +70,16 @@ fn main() -> Result<()> {
         .value_of("CRATE_DIR")
         .expect("crate_dir not provided")
         .into();
-    let output_filename: PathBuf = matches
-        .value_of("OUTPUT_HEADER_FILE")
-        .expect("output_file not provided")
-        .into();
-    let output_linker_file: PathBuf = matches
-        .value_of("OUTPUT_LINKER_FILE")
-        .expect("output_linker_file not provided")
-        .into();
+    let header_path: Option<&str> = matches.value_of("OUTPUT_HEADER_FILE");
+    if let Some(header_path) = header_path {
+        let generated = cbindgen::generate(&crate_dir).expect("Couldn't generate headers.");
+        generated.write_to_file(&header_path);
+    }
+    let output_linker_file: Option<&str> = matches.value_of("OUTPUT_LINKER_FILE");
+    if output_linker_file.is_none() {
+        return Ok(());
+    }
+    let output_linker_file: PathBuf = output_linker_file.unwrap().into();
     println!(
         "output linker file {}",
         output_linker_file.to_string_lossy()
@@ -98,9 +100,6 @@ fn main() -> Result<()> {
     eprintln!("Cargo args {}", join(cargo_args.clone(), ", "));
     eprintln!("env args {}", join(std::env::args(), ", "));
 
-    let generated = cbindgen::generate(&crate_dir).expect("Couldn't generate headers.");
-    generated.write_to_file(&output_filename);
-
     let mut extra_cargo_args = Vec::new();
     let rand_arg = format!("-Clink-arg=/VERSION:{}", rand::random::<u16>());
     extra_cargo_args.extend(&["-Z", "print-link-args", "-C", "save-temps", &rand_arg]);
@@ -119,12 +118,12 @@ fn main() -> Result<()> {
             // println!("stdout {}", stdout);
             if let Some(last_line) = stdout.lines().last() {
                 if last_line.contains(".def") {
-                    let mut output_linker_file = std::fs::File::create(output_linker_file)?;
-                    let mut output_lib_file = std::fs::File::create(output_lib_link_file)?;
+                    let mut output_linker_file = std::fs::File::create(&output_linker_file)?;
+                    let mut output_lib_file = std::fs::File::create(&output_lib_link_file)?;
                     let args = parse_quotes(&last_line);
                     if let Some(linker_flavor) = args.first() {
                         match linker_flavor.as_str() {
-                            "link.exe" => {}
+                            "link.exe" | "lld-link.exe" => {}
                             _ => panic!("Unrecognized linker flavor {}", linker_flavor),
                         }
                     } else {
@@ -143,22 +142,25 @@ fn main() -> Result<()> {
                                 "LIBPATH" | "IMPLIB" => {
                                     writeln!(
                                         &mut output_linker_file,
-                                        "/{}:{}",
+                                        "/{}:\"{}\"",
                                         option_name, option_arg
                                     )?;
                                 }
                                 "DEF" => {
+                                    let def_file_path = output_lib_link_file.with_file_name("build_def.def");
+                                    std::fs::copy(option_arg, &def_file_path).expect("Failed to copy def file");
                                     // include DEF file for both linker and lib
-                                    writeln!(&mut output_linker_file, "/DEF:{}", option_arg)?;
-                                    writeln!(&mut output_lib_file, "/DEF:{}", option_arg)?;
+                                    writeln!(&mut output_linker_file, "/DEF:\"{}\"", def_file_path.to_string_lossy())?;
+                                    writeln!(&mut output_lib_file, "/DEF:\"{}\"", def_file_path.to_string_lossy())?;
                                 }
                                 _ => {}
                             }
                         } else {
-                            writeln!(&mut output_linker_file, "{}", arg)?;
                             if arg.ends_with(".o") || arg.ends_with(".rlib") {
                                 // include only object/rlib files in lib file
-                                writeln!(&mut output_lib_file, "{}", arg)?;
+                                writeln!(&mut output_lib_file, "\"{}\"", arg)?;
+                            } else {
+                                writeln!(&mut output_linker_file, "\"{}\"", arg)?;
                             }
                         }
                     }
