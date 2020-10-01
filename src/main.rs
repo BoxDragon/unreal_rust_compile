@@ -97,6 +97,7 @@ fn main() -> Result<()> {
             use std::io::Read;
             current_header.read_to_end(&mut existing_data)?;
         }
+        std::fs::create_dir_all(PathBuf::from(header_path).parent().unwrap())?;
         if new_data != existing_data {
             std::fs::create_dir_all(PathBuf::from(header_path).parent().unwrap())?;
             std::fs::write(&header_path, new_data)?;
@@ -182,8 +183,10 @@ fn main() -> Result<()> {
                                     "DEF" => {
                                         let def_file_path =
                                             output_lib_link_file.with_file_name("build_def.def");
-                                        std::fs::copy(option_arg, &def_file_path)
-                                            .expect("Failed to copy def file");
+                                        if let Ok(_metadata) = std::fs::metadata(option_arg) {
+                                            std::fs::copy(option_arg, &def_file_path)
+                                                .expect("Failed to copy def file");
+                                        }
                                         // include DEF file for both linker and lib
                                         writeln!(
                                             &mut output_linker_file,
