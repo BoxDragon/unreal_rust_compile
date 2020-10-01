@@ -98,6 +98,7 @@ fn main() -> Result<()> {
             current_header.read_to_end(&mut existing_data)?;
         }
         if new_data != existing_data {
+            std::fs::create_dir_all(PathBuf::from(header_path).parent().unwrap())?;
             std::fs::write(&header_path, new_data)?;
             println!("Header changed");
         }
@@ -141,9 +142,11 @@ fn main() -> Result<()> {
                 println!("{}", text); // output the compiler output
                 let stdout =
                     std::str::from_utf8(&output.stdout).expect("Cargo did not output utf8");
+                let mut success = false;
                 // println!("stdout {}", stdout);
                 if let Some(last_line) = stdout.lines().last() {
                     if last_line.contains(".def") {
+                        success = true;
                         let mut output_linker_file = std::fs::File::create(&output_linker_file)?;
                         let mut output_lib_file = std::fs::File::create(&output_lib_link_file)?;
                         let args = parse_quotes(&last_line);
@@ -208,9 +211,12 @@ fn main() -> Result<()> {
                         println!("NO LINKER ARGS");
                     }
                 }
-                true
+                success
             }
-            Err(_) => false,
+            Err(err) => {
+                eprintln!("Compile error: {}", err);
+                false
+            }
         };
         if !command_success {
             std::process::exit(1);
