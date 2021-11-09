@@ -1,9 +1,14 @@
 use anyhow::Result;
-use std::io::Write;
+use cargo::core::manifest::TargetSourcePath;
+use cargo::core::{SourceId, TargetKind};
+use cargo::Config;
+use std::fs::{self, DirEntry};
+use std::io;
 use std::path::PathBuf;
 use std::process::Command;
+use std::{io::Write, path::Path};
 
-use cbindgen;
+use cbindgen::{self};
 use clap::{App, Arg, SubCommand};
 
 pub fn parse_quotes(s: impl AsRef<str>) -> Vec<String> {
@@ -53,6 +58,21 @@ pub fn parse_quotes(s: impl AsRef<str>) -> Vec<String> {
     args
 }
 
+fn visit_dirs(dir: &Path, cb: &dyn Fn(&DirEntry)) -> io::Result<()> {
+    if dir.is_dir() {
+        for entry in fs::read_dir(dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_dir() {
+                visit_dirs(&path, cb)?;
+            } else {
+                cb(&entry);
+            }
+        }
+    }
+    Ok(())
+}
+
 fn main() -> Result<()> {
     let matches = App::new("unreal_rust_compile")
         .version("0.1")
@@ -75,7 +95,7 @@ fn main() -> Result<()> {
         .subcommand(SubCommand::with_name("source-files")
             .about("Get a list of all source files required to compile the crate")
             .version("0.1")
-            .arg(Arg::with_name("CARGO_ARGS").multiple(true).last(true).required(false).allow_hyphen_values(true).help("Arguments to cargo. Cargo will be run with \"crate_dir\" as the working directory."))
+            .arg(Arg::with_name("CRATE_DIR").long("crate_dir").required(true).takes_value(true).help("Input crate directory"))
         )
 	.get_matches();
 
@@ -105,6 +125,34 @@ fn main() -> Result<()> {
         }
     }
 
+    if let Some(matches) = matches.subcommand_matches("source-files") {
+        let crate_dir: PathBuf = matches
+            .value_of("CRATE_DIR")
+            .expect("crate_dir not provided")
+            .into();
+        let cargo_toml_path = crate_dir.join("Cargo.toml");
+        let config = Config::default().unwrap();
+        let ws = cargo::core::Workspace::new(&cargo_toml_path, &config).unwrap();
+        let (packages, _) = cargo::ops::resolve_ws(&ws).unwrap();
+        for package in packages.package_ids() {
+            if let Some(path) = package.source_id().local_path() {
+                let package_toml_path = path.join("Cargo.toml");
+                let package = ws.load(&package_toml_path).unwrap();
+                for target in package.targets() {
+                    if let TargetKind::Lib(_) = target.kind() {
+                        if let TargetSourcePath::Path(path) = target.src_path() {
+                            let dir = path.parent().unwrap();
+                            visit_dirs(dir, &|entry| {
+                                println!("{}", entry.path().to_string_lossy());
+                            })
+                            .expect("error walking directory");
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     if let Some(matches) = matches.subcommand_matches("rustc") {
         let output_linker_file: &str = matches
             .value_of("OUTPUT_LINKER_FILE")
@@ -129,6 +177,7 @@ fn main() -> Result<()> {
         // Build the cargo command from the args
         let rustc_arg = Vec::from(["rustc"]);
         let compile_result = Command::new("cargo")
+            .env("CARGO_INCREMENTAL", "1")
             .args(
                 rustc_arg
                     .into_iter()
