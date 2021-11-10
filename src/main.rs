@@ -1,6 +1,6 @@
 use anyhow::Result;
 use cargo::core::manifest::TargetSourcePath;
-use cargo::core::{SourceId, TargetKind};
+use cargo::core::TargetKind;
 use cargo::Config;
 use std::fs::{self, DirEntry};
 use std::io;
