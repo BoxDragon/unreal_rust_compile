@@ -206,13 +206,16 @@ fn main() -> Result<()> {
                                 .file_name()
                                 .unwrap_or(std::ffi::OsStr::new(""));
                             match linker_flavor_filename.to_str().unwrap_or("") {
-                                "link.exe" | "lld-link.exe" => {}
+                                "link.exe" | "lld-link.exe" | "rust-lld.exe" => {}
                                 _ => panic!("Unrecognized linker flavor {}", linker_flavor),
                             }
                         } else {
                             panic!("No linker args found!");
                         }
-                        for arg in &args[1..] {
+                        let mut idx = 0;
+                        while idx < args.len() {
+                            let arg = &args[idx];
+                            idx += 1;
                             if arg.starts_with("/") || arg.starts_with("-") {
                                 let arg_end_idx = arg.find(":");
                                 let option_name = &arg[1..arg_end_idx.unwrap_or(arg.len())];
@@ -228,6 +231,10 @@ fn main() -> Result<()> {
                                             "/{}:\"{}\"",
                                             option_name, option_arg
                                         )?;
+                                    }
+                                    "flavor" => {
+                                        // consume argument
+                                        idx += 1;
                                     }
                                     "DEF" => {
                                         let def_file_path =
@@ -250,7 +257,7 @@ fn main() -> Result<()> {
                                     }
                                     _ => {}
                                 }
-                            } else {
+                            } else if !arg.ends_with(".exe") {
                                 if arg.ends_with(".o") || arg.ends_with(".rlib") {
                                     // include only object/rlib files in lib file
                                     writeln!(&mut output_lib_file, "\"{}\"", arg)?;
