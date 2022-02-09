@@ -90,7 +90,7 @@ fn main() -> Result<()> {
             .version("0.1")
             .arg(Arg::with_name("OUTPUT_LINKER_FILE").long("output_linker_file").required(true).takes_value(true).help("Path to output linker args at"))
             .arg(Arg::with_name("OUTPUT_LIB_LINK_FILE").long("output_lib_link_file").required(true).takes_value(true).help("Path to output library linker (LIB.EXE) args at"))
-            .arg(Arg::with_name("GEN_RESPONSE_FILE").long("gen_response_file").help("Whether to generate a response file"))
+            .arg(Arg::with_name("GEN_RESPONSE_FILE").long("gen_response_file").takes_value(false).help("Whether to generate a response file"))
             .arg(Arg::with_name("CARGO_ARGS").multiple(true).last(true).allow_hyphen_values(true).help("Arguments to cargo. Cargo will be run with \"crate_dir\" as the working directory."))
         )
         .subcommand(SubCommand::with_name("source-files")
