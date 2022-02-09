@@ -90,6 +90,7 @@ fn main() -> Result<()> {
             .version("0.1")
             .arg(Arg::with_name("OUTPUT_LINKER_FILE").long("output_linker_file").required(true).takes_value(true).help("Path to output linker args at"))
             .arg(Arg::with_name("OUTPUT_LIB_LINK_FILE").long("output_lib_link_file").required(true).takes_value(true).help("Path to output library linker (LIB.EXE) args at"))
+            .arg(Arg::with_name("GEN_RESPONSE_FILE").long("gen_response_file").help("Whether to generate a response file"))
             .arg(Arg::with_name("CARGO_ARGS").multiple(true).last(true).allow_hyphen_values(true).help("Arguments to cargo. Cargo will be run with \"crate_dir\" as the working directory."))
         )
         .subcommand(SubCommand::with_name("source-files")
@@ -165,6 +166,7 @@ fn main() -> Result<()> {
         let cargo_args = matches
             .values_of("CARGO_ARGS")
             .expect("No cargo args provided");
+        let gen_response_file = matches.is_present("GEN_RESPONSE_FILE");
         use itertools::join;
 
         eprintln!("Cargo args {}", join(cargo_args.clone(), ", "));
@@ -172,15 +174,17 @@ fn main() -> Result<()> {
 
         let mut extra_cargo_args = Vec::new();
         let rand_arg = format!("-Clink-arg=/VERSION:{}", rand::random::<u16>());
-        extra_cargo_args.extend(&[
-            "--print",
-            "link-args",
-            "-Z",
-            "unstable-options",
-            "-C",
-            "save-temps",
-            &rand_arg,
-        ]);
+        if gen_response_file {
+            extra_cargo_args.extend(&[
+                "--print",
+                "link-args",
+                "-Z",
+                "unstable-options",
+                "-C",
+                "save-temps",
+                &rand_arg,
+            ]);
+        }
         // generate the header file data and write it into a vec of bytes
         // Build the cargo command from the args
         let rustc_arg = Vec::from(["rustc"]);
@@ -201,82 +205,87 @@ fn main() -> Result<()> {
                 let stdout =
                     std::str::from_utf8(&output.stdout).expect("Cargo did not output utf8");
                 let mut success = false;
-                // println!("stdout {}", stdout);
-                if let Some(last_line) = stdout.lines().last() {
-                    if last_line.contains(".def") {
-                        success = true;
-                        let mut output_linker_file = std::fs::File::create(&output_linker_file)?;
-                        let mut output_lib_file = std::fs::File::create(&output_lib_link_file)?;
-                        let args = parse_quotes(&last_line);
-                        if let Some(linker_flavor) = args.first() {
-                            let linker_flavor_path = PathBuf::from(linker_flavor);
-                            let linker_flavor_filename = linker_flavor_path
-                                .file_name()
-                                .unwrap_or(std::ffi::OsStr::new(""));
-                            match linker_flavor_filename.to_str().unwrap_or("") {
-                                "link.exe" | "lld-link.exe" | "rust-lld.exe" => {}
-                                _ => panic!("Unrecognized linker flavor {}", linker_flavor),
+                if gen_response_file {
+                    // println!("stdout {}", stdout);
+                    if let Some(last_line) = stdout.lines().last() {
+                        if last_line.contains(".def") {
+                            success = true;
+                            let mut output_linker_file =
+                                std::fs::File::create(&output_linker_file)?;
+                            let mut output_lib_file = std::fs::File::create(&output_lib_link_file)?;
+                            let args = parse_quotes(&last_line);
+                            if let Some(linker_flavor) = args.first() {
+                                let linker_flavor_path = PathBuf::from(linker_flavor);
+                                let linker_flavor_filename = linker_flavor_path
+                                    .file_name()
+                                    .unwrap_or(std::ffi::OsStr::new(""));
+                                match linker_flavor_filename.to_str().unwrap_or("") {
+                                    "link.exe" | "lld-link.exe" | "rust-lld.exe" => {}
+                                    _ => panic!("Unrecognized linker flavor {}", linker_flavor),
+                                }
+                            } else {
+                                panic!("No linker args found!");
+                            }
+                            let mut idx = 0;
+                            while idx < args.len() {
+                                let arg = &args[idx];
+                                idx += 1;
+                                if arg.starts_with("/") || arg.starts_with("-") {
+                                    let arg_end_idx = arg.find(":");
+                                    let option_name = &arg[1..arg_end_idx.unwrap_or(arg.len())];
+                                    let option_arg = if let Some(arg_end_idx) = arg_end_idx {
+                                        &arg[(1 + arg_end_idx)..]
+                                    } else {
+                                        ""
+                                    };
+                                    match option_name {
+                                        "LIBPATH" | "IMPLIB" => {
+                                            writeln!(
+                                                &mut output_linker_file,
+                                                "/{}:\"{}\"",
+                                                option_name, option_arg
+                                            )?;
+                                        }
+                                        "flavor" => {
+                                            // consume argument
+                                            idx += 1;
+                                        }
+                                        "DEF" => {
+                                            let def_file_path = output_lib_link_file
+                                                .with_file_name("build_def.def");
+                                            if let Ok(_metadata) = std::fs::metadata(option_arg) {
+                                                std::fs::copy(option_arg, &def_file_path)
+                                                    .expect("Failed to copy def file");
+                                            }
+                                            // include DEF file for both linker and lib
+                                            writeln!(
+                                                &mut output_linker_file,
+                                                "/DEF:\"{}\"",
+                                                def_file_path.to_string_lossy()
+                                            )?;
+                                            writeln!(
+                                                &mut output_lib_file,
+                                                "/DEF:\"{}\"",
+                                                def_file_path.to_string_lossy()
+                                            )?;
+                                        }
+                                        _ => {}
+                                    }
+                                } else if !arg.ends_with(".exe") {
+                                    if arg.ends_with(".o") || arg.ends_with(".rlib") {
+                                        // include only object/rlib files in lib file
+                                        writeln!(&mut output_lib_file, "\"{}\"", arg)?;
+                                    } else {
+                                        writeln!(&mut output_linker_file, "\"{}\"", arg)?;
+                                    }
+                                }
                             }
                         } else {
-                            panic!("No linker args found!");
+                            println!("NO LINKER ARGS");
                         }
-                        let mut idx = 0;
-                        while idx < args.len() {
-                            let arg = &args[idx];
-                            idx += 1;
-                            if arg.starts_with("/") || arg.starts_with("-") {
-                                let arg_end_idx = arg.find(":");
-                                let option_name = &arg[1..arg_end_idx.unwrap_or(arg.len())];
-                                let option_arg = if let Some(arg_end_idx) = arg_end_idx {
-                                    &arg[(1 + arg_end_idx)..]
-                                } else {
-                                    ""
-                                };
-                                match option_name {
-                                    "LIBPATH" | "IMPLIB" => {
-                                        writeln!(
-                                            &mut output_linker_file,
-                                            "/{}:\"{}\"",
-                                            option_name, option_arg
-                                        )?;
-                                    }
-                                    "flavor" => {
-                                        // consume argument
-                                        idx += 1;
-                                    }
-                                    "DEF" => {
-                                        let def_file_path =
-                                            output_lib_link_file.with_file_name("build_def.def");
-                                        if let Ok(_metadata) = std::fs::metadata(option_arg) {
-                                            std::fs::copy(option_arg, &def_file_path)
-                                                .expect("Failed to copy def file");
-                                        }
-                                        // include DEF file for both linker and lib
-                                        writeln!(
-                                            &mut output_linker_file,
-                                            "/DEF:\"{}\"",
-                                            def_file_path.to_string_lossy()
-                                        )?;
-                                        writeln!(
-                                            &mut output_lib_file,
-                                            "/DEF:\"{}\"",
-                                            def_file_path.to_string_lossy()
-                                        )?;
-                                    }
-                                    _ => {}
-                                }
-                            } else if !arg.ends_with(".exe") {
-                                if arg.ends_with(".o") || arg.ends_with(".rlib") {
-                                    // include only object/rlib files in lib file
-                                    writeln!(&mut output_lib_file, "\"{}\"", arg)?;
-                                } else {
-                                    writeln!(&mut output_linker_file, "\"{}\"", arg)?;
-                                }
-                            }
-                        }
-                    } else {
-                        println!("NO LINKER ARGS");
                     }
+                } else {
+                    success = true;
                 }
                 success
             }
