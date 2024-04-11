@@ -175,15 +175,7 @@ fn main() -> Result<()> {
         let mut extra_cargo_args = Vec::new();
         let rand_arg = format!("-Clink-arg=/VERSION:{}", rand::random::<u16>());
         if gen_response_file {
-            extra_cargo_args.extend(&[
-                "--print",
-                "link-args",
-                "-Z",
-                "unstable-options",
-                "-C",
-                "save-temps",
-                &rand_arg,
-            ]);
+            extra_cargo_args.extend(&["--print", "link-args", "-C", "save-temps", &rand_arg]);
         }
         // generate the header file data and write it into a vec of bytes
         // Build the cargo command from the args
