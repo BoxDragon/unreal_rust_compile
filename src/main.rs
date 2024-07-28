@@ -1,7 +1,7 @@
 use anyhow::Result;
 use cargo::core::manifest::TargetSourcePath;
 use cargo::core::TargetKind;
-use cargo::Config;
+use cargo::GlobalContext;
 use std::fs::{self, DirEntry};
 use std::io;
 use std::path::PathBuf;
@@ -132,8 +132,8 @@ fn main() -> Result<()> {
             .expect("crate_dir not provided")
             .into();
         let cargo_toml_path = crate_dir.join("Cargo.toml");
-        let config = Config::default().unwrap();
-        let ws = cargo::core::Workspace::new(&cargo_toml_path, &config).unwrap();
+        let ctx = GlobalContext::default().unwrap();
+        let ws = cargo::core::Workspace::new(&cargo_toml_path, &ctx).unwrap();
         let (packages, _) = cargo::ops::resolve_ws(&ws).unwrap();
         for package in packages.package_ids() {
             if let Some(path) = package.source_id().local_path() {
