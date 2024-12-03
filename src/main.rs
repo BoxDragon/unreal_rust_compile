@@ -134,7 +134,7 @@ fn main() -> Result<()> {
         let cargo_toml_path = crate_dir.join("Cargo.toml");
         let ctx = GlobalContext::default().unwrap();
         let ws = cargo::core::Workspace::new(&cargo_toml_path, &ctx).unwrap();
-        let (packages, _) = cargo::ops::resolve_ws(&ws).unwrap();
+        let (packages, _) = cargo::ops::resolve_ws(&ws, false).unwrap();
         for package in packages.package_ids() {
             if let Some(path) = package.source_id().local_path() {
                 let package_toml_path = path.join("Cargo.toml");
